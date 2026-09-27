@@ -2,6 +2,20 @@
   command = "npm run build"
   publish = "dist"
 
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/git/clone"
+  to = "/.netlify/functions/git-clone"
+  status = 200
+
+[[redirects]]
+  from = "/api/git/local"
+  to = "/.netlify/functions/git-local"
+  status = 200
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

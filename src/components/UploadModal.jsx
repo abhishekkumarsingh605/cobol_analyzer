@@ -16,6 +16,7 @@ import {
   Globe,
   Loader2
 } from 'lucide-react';
+import { fetchGithubRepoBrowser } from '../services/gitBrowserService.js';
 
 export default function UploadModal({ 
   isOpen, 
@@ -119,24 +120,62 @@ export default function UploadModal({
 
     try {
       if (gitMode === 'remote') {
-        if (!repoUrl.trim()) {
+        const cleanUrl = repoUrl.trim();
+        if (!cleanUrl) {
           throw new Error('Please enter a Git repository URL.');
         }
 
-        setStatusMsg(`Cloning repository ${repoUrl.trim()}...`);
-        const response = await fetch('/api/git/clone', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ repoUrl: repoUrl.trim(), branch: branch.trim() })
-        });
+        setStatusMsg(`Cloning repository ${cleanUrl}...`);
 
-        const data = await response.json();
-        if (!response.ok || data.error) {
-          throw new Error(data.error || 'Failed to clone repository.');
+        let data = null;
+        let response = null;
+
+        // Step 1: Try standard API endpoint (/api/git/clone)
+        try {
+          response = await fetch('/api/git/clone', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ repoUrl: cleanUrl, branch: branch.trim() })
+          });
+        } catch (fetchErr) {
+          console.warn('POST /api/git/clone network error:', fetchErr);
+        }
+
+        // Step 2: If 404 (e.g. deployed on Netlify directly), try /.netlify/functions/git-clone
+        if (!response || response.status === 404) {
+          try {
+            response = await fetch('/.netlify/functions/git-clone', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ repoUrl: cleanUrl, branch: branch.trim() })
+            });
+          } catch (funcErr) {
+            console.warn('POST /.netlify/functions/git-clone network error:', funcErr);
+          }
+        }
+
+        // Step 3: Handle response if server endpoint answered
+        if (response && response.ok) {
+          data = await response.json();
+        } else if (response && response.status !== 404) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || `Server returned error (${response.status}) while cloning repository.`);
+        }
+
+        // Step 4: If serverless endpoint returned 404 or was unreachable, fallback to browser-direct fetch for GitHub
+        if (!data) {
+          if (cleanUrl.toLowerCase().includes('github.com')) {
+            setStatusMsg('Connecting directly to GitHub repository...');
+            data = await fetchGithubRepoBrowser(cleanUrl, branch.trim(), (msg) => setStatusMsg(msg));
+          } else {
+            throw new Error(
+              'Git service endpoint was not found (HTTP 404). If deploying to Netlify, ensure the Netlify Functions are included in your deployment. For public repositories, GitHub URLs (https://github.com/...) are supported with automatic browser-direct cloning.'
+            );
+          }
         }
 
         if (!data.files || data.files.length === 0) {
-          throw new Error(`Repository cloned successfully, but no COBOL files (.cbl, .cob, .cpy, .inc, .pco, .sqb) were found in the codebase.`);
+          throw new Error(`Repository cloned successfully, but no COBOL or mainframe files (.cbl, .cob, .cpy, .inc, .pco, .sqb, .jcl) were found in the codebase.`);
         }
 
         setStatusMsg(`Found ${data.files.length} COBOL artifacts in repository. Loading...`);
@@ -147,24 +186,43 @@ export default function UploadModal({
 
       } else {
         // Local Git repo on host
-        if (!localRepoPath.trim()) {
+        const cleanLocalPath = localRepoPath.trim();
+        if (!cleanLocalPath) {
           throw new Error('Please enter an absolute local repository path.');
         }
 
-        setStatusMsg(`Scanning local repository path: ${localRepoPath}...`);
-        const response = await fetch('/api/git/local', {
+        const isHosted = typeof window !== 'undefined' && 
+          window.location.hostname !== 'localhost' && 
+          window.location.hostname !== '127.0.0.1';
+
+        if (isHosted) {
+          throw new Error(
+            'Reading local filesystem paths is only available when running locally on your computer (npm run dev). In this cloud deployment, please switch to the "Upload Codebase" tab to select your local folder or ZIP archive.'
+          );
+        }
+
+        setStatusMsg(`Scanning local repository path: ${cleanLocalPath}...`);
+        let response = await fetch('/api/git/local', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ repoPath: localRepoPath.trim() })
+          body: JSON.stringify({ repoPath: cleanLocalPath })
         });
 
-        const data = await response.json();
+        if (response.status === 404) {
+          response = await fetch('/.netlify/functions/git-local', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ repoPath: cleanLocalPath })
+          });
+        }
+
+        const data = await response.json().catch(() => ({}));
         if (!response.ok || data.error) {
           throw new Error(data.error || 'Failed to read local repository.');
         }
 
         if (!data.files || data.files.length === 0) {
-          throw new Error(`Path found, but no COBOL files (.cbl, .cob, .cpy) were detected in "${localRepoPath}".`);
+          throw new Error(`Path found, but no COBOL files (.cbl, .cob, .cpy) were detected in "${cleanLocalPath}".`);
         }
 
         setStatusMsg(`Found ${data.files.length} COBOL files. Analyzing...`);
@@ -579,6 +637,26 @@ export default function UploadModal({
               ) : (
                 /* Local Git Repository Path */
                 <form onSubmit={handleGitSubmit}>
+                  {typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1' && (
+                    <div style={{
+                      marginBottom: '16px',
+                      padding: '12px 14px',
+                      borderRadius: 'var(--radius-sm)',
+                      background: 'rgba(234, 179, 8, 0.1)',
+                      border: '1px solid rgba(234, 179, 8, 0.3)',
+                      color: '#fef08a',
+                      fontSize: '0.8rem',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '8px'
+                    }}>
+                      <AlertCircle size={16} color="#eab308" style={{ flexShrink: 0, marginTop: '2px' }} />
+                      <div>
+                        <strong>Running on Cloud / Netlify:</strong> Scanning local computer filesystem paths is only available when running locally (<code>npm run dev</code>). In this hosted deployment, please use the <strong>Upload Codebase</strong> tab (Folder/ZIP upload) or the <strong>Remote Git Repository URL</strong> tab.
+                      </div>
+                    </div>
+                  )}
+
                   <div style={{ marginBottom: '20px' }}>
                     <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
                       Local Git Repository Path on Machine:
