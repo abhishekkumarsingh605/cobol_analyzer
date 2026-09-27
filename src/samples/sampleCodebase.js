@@ -1,0 +1,505 @@
+// Enterprise Core Banking & Transaction Processing Codebase
+// Structured across directories: cbl/, cpy/, jcl/, sql/
+// Includes file size in bytes, last modified date, and mainframe details
+
+export const SAMPLE_ENTERPRISE_CODEBASE = [
+  {
+    name: 'BATMN01.cbl',
+    path: 'cbl/BATMN01.cbl',
+    sizeBytes: 1845,
+    lastModified: '2026-08-14T09:30:00.000Z',
+    content: `000100 IDENTIFICATION DIVISION.
+000200 PROGRAM-ID. BATMN01.
+000300 AUTHOR. ENTERPRISE CORE BANKING TEAM.
+000400* ============================================================
+000500* ROOT BATCH DISPATCHER: OVERNIGHT SETTLEMENT & POSTING
+000600* ============================================================
+000700 ENVIRONMENT DIVISION.
+000800 DATA DIVISION.
+000900 WORKING-STORAGE SECTION.
+001000     COPY COMMERR.
+001100     COPY BATCTL.
+001200     EXEC SQL INCLUDE SQLCA END-EXEC.
+001300
+001400 01  WS-SECURITY-CTX.
+001500     05  WS-OPERATOR-ID      PIC X(8) VALUE 'SYSBATCH'.
+001600     05  WS-AUTH-TOKEN       PIC X(32).
+001700     05  WS-AUTH-STATUS      PIC S9(4) COMP VALUE ZERO.
+001800
+001900 01  WS-ACCT-VAL-PARAM.
+002000     05  WS-REQ-ACCT-ID      PIC 9(10) VALUE 1002345678.
+002100     05  WS-REQ-STATUS       PIC X(2).
+002200
+002300 01  WS-TXN-POST-PARAM.
+002400     05  WS-POST-TXN-ID      PIC X(16) VALUE 'TXN994821034'.
+002500     05  WS-POST-ACCT-ID     PIC 9(10) VALUE 1002345678.
+002600     05  WS-POST-AMOUNT      PIC S9(9)V99 COMP-3 VALUE 1500.50.
+002700     05  WS-POST-RESULT      PIC X(2).
+002800
+002900 01  WS-AUDIT-LOG-RECORD.
+003000     05  WS-AUDIT-PGM        PIC X(8) VALUE 'BATMN01'.
+003100     05  WS-AUDIT-ACTION     PIC X(40) VALUE 'BATCH POSTING CYCLE STARTED'.
+003200     05  WS-AUDIT-CODE       PIC 9(4) VALUE 0.
+003300
+003400 PROCEDURE DIVISION.
+003500 0000-MAIN-DISPATCH SECTION.
+003600 0000-INIT.
+003700     PERFORM 1000-INITIALIZE
+003800     PERFORM 2000-AUTHENTICATE
+003900     PERFORM 3000-PROCESS-BATCH
+004000     PERFORM 4000-FINALIZE
+004100     STOP RUN.
+004200
+004300 1000-INITIALIZE SECTION.
+004400 1000-START.
+004500     CALL 'DBLOGR' USING WS-AUDIT-LOG-RECORD.
+004600
+004700 2000-AUTHENTICATE SECTION.
+004800 2000-START.
+004900* Call external security module (NOTE: SECUPROV is not present in codebase)
+005000     CALL 'SECUPROV' USING WS-SECURITY-CTX.
+005100
+005200 3000-PROCESS-BATCH SECTION.
+005300 3000-START.
+005400* Validate account eligibility
+005500     CALL 'ACCTVAL' USING WS-ACCT-VAL-PARAM.
+005600     IF WS-REQ-STATUS = '00'
+005700* Post transaction ledger updates
+005800         CALL 'TXNPOST' USING WS-TXN-POST-PARAM
+005900     END-IF.
+006000
+006100 4000-FINALIZE SECTION.
+006200 4000-START.
+006300     MOVE 'BATCH CYCLE COMPLETE' TO WS-AUDIT-ACTION.
+006400     CALL 'DBLOGR' USING WS-AUDIT-LOG-RECORD.
+`
+  },
+  {
+    name: 'ACCTVAL.cbl',
+    path: 'cbl/ACCTVAL.cbl',
+    sizeBytes: 1540,
+    lastModified: '2026-08-11T14:15:00.000Z',
+    content: `000100 IDENTIFICATION DIVISION.
+000200 PROGRAM-ID. ACCTVAL.
+000300 AUTHOR. ENTERPRISE CORE BANKING TEAM.
+000400* ============================================================
+000500* ACCOUNT VALIDATION & INTEGRITY INSPECTOR
+000600* ============================================================
+000700 DATA DIVISION.
+000800 WORKING-STORAGE SECTION.
+000900     COPY ACCTREC.
+001000     EXEC SQL INCLUDE SQLCA END-EXEC.
+001100
+001200 01  WS-CUST-REQ-ID          PIC 9(9).
+001300 01  WS-CUST-STATUS          PIC X(2).
+001400 01  WS-LOG-RECORD.
+001500     05  WS-LOG-PGM          PIC X(8) VALUE 'ACCTVAL'.
+001600     05  WS-LOG-MSG          PIC X(40) VALUE 'VALIDATING ACCOUNT BALANCE'.
+001700     05  WS-LOG-RC           PIC 9(4) VALUE 0.
+001800
+001900 LINKAGE SECTION.
+002000 01  LS-PARAM.
+002100     05  LS-ACCT-ID          PIC 9(10).
+002200     05  LS-STATUS-OUT       PIC X(2).
+002300
+002400 PROCEDURE DIVISION USING LS-PARAM.
+002500 0000-VALIDATE SECTION.
+002600 0000-START.
+002700     EXEC SQL
+002800         SELECT ACCT_ID, CUST_ID, ACCT_TYPE, BALANCE, STATUS
+002900         INTO :WS-ACCT-ID, :WS-CUST-ID, :WS-ACCT-TYPE, :WS-BALANCE, :WS-STATUS
+003000         FROM ACCOUNTS
+003100         WHERE ACCT_ID = :LS-ACCT-ID
+003200     END-EXEC.
+003300
+003400     IF SQLCODE NOT = 0
+003500         MOVE '99' TO LS-STATUS-OUT
+003600         CALL 'DBLOGR' USING WS-LOG-RECORD
+003700         GOBACK
+003800     END-IF.
+003900
+004000* Cross-reference customer status
+004100     MOVE WS-CUST-ID TO WS-CUST-REQ-ID.
+004200     CALL 'CUSTINQ' USING WS-CUST-REQ-ID WS-CUST-STATUS.
+004300
+004400     IF WS-CUST-STATUS = '00' AND WS-STATUS = 'A'
+004500         MOVE '00' TO LS-STATUS-OUT
+004600     ELSE
+004700         MOVE '02' TO LS-STATUS-OUT
+004800     END-IF.
+004900
+005000     GOBACK.
+`
+  },
+  {
+    name: 'TXNPOST.cbl',
+    path: 'cbl/TXNPOST.cbl',
+    sizeBytes: 2180,
+    lastModified: '2026-08-20T11:45:00.000Z',
+    content: `000100 IDENTIFICATION DIVISION.
+000200 PROGRAM-ID. TXNPOST.
+000300 AUTHOR. ENTERPRISE CORE BANKING TEAM.
+000400* ============================================================
+000500* FINANCIAL TRANSACTION POSTING & LEDGER JOURNAL
+000600* ============================================================
+000700 DATA DIVISION.
+000800 WORKING-STORAGE SECTION.
+000900     COPY TXNREC.
+001000     COPY ACCTREC.
+001100     EXEC SQL INCLUDE SQLCA END-EXEC.
+001200
+001300 01  WS-TAX-PARAMS.
+001400     05  WS-TAXABLE-AMT      PIC S9(9)V99 COMP-3.
+001500     05  WS-CALC-TAX         PIC S9(7)V99 COMP-3.
+001600
+001700 01  WS-NOTIF-PAYLOAD.
+001800     05  WS-NOTIF-DEST       PIC X(10).
+001900     05  WS-NOTIF-MSG        PIC X(60).
+002000
+002100 01  WS-LOG-REC.
+002200     05  WS-PGM              PIC X(8) VALUE 'TXNPOST'.
+002300     05  WS-DESC             PIC X(40) VALUE 'POSTING TRANSACTION'.
+002400     05  WS-CODE             PIC 9(4) VALUE 0.
+002500
+002600 LINKAGE SECTION.
+002700 01  LS-TXN-DATA.
+002800     05  LS-TXN-ID           PIC X(16).
+002900     05  LS-ACCT-ID          PIC 9(10).
+003000     05  LS-AMOUNT           PIC S9(9)V99 COMP-3.
+003100     05  LS-RESULT           PIC X(2).
+003200
+003300 PROCEDURE DIVISION USING LS-TXN-DATA.
+003400 0000-POST-MAIN SECTION.
+003500 0000-START.
+003600* Verify Account Pre-Condition
+003700     CALL 'ACCTVAL' USING LS-ACCT-ID LS-RESULT.
+003800
+003900* Compute Fee/Tax via external engine (NOTE: TAXCALC is missing)
+004000     MOVE LS-AMOUNT TO WS-TAXABLE-AMT.
+004100     CALL 'TAXCALC' USING WS-TAX-PARAMS.
+004200
+004300* Insert Ledger Record
+004400     EXEC SQL
+004500         INSERT INTO TRANSACTIONS (
+004600             TXN_ID, ACCT_ID, TXN_TYPE, AMOUNT, TXN_DATE, STATUS
+004700         ) VALUES (
+004800             :LS-TXN-ID, :LS-ACCT-ID, 'DEPOSIT', :LS-AMOUNT, CURRENT TIMESTAMP, 'POSTED'
+004900         )
+005000     END-EXEC.
+005100
+005200* Update Account Balance in Database
+005300     EXEC SQL
+005400         UPDATE ACCOUNTS
+005500         SET BALANCE = BALANCE + :LS-AMOUNT,
+005600             LAST_TXN_DT = CURRENT DATE
+005700         WHERE ACCT_ID = :LS-ACCT-ID
+005800     END-EXEC.
+005900
+006000* Trigger Notification Service (NOTE: NOTIFYM is missing)
+006100     MOVE 'POST_SUCCESS' TO WS-NOTIF-MSG.
+006200     CALL 'NOTIFYM' USING WS-NOTIF-PAYLOAD.
+006300
+006400* Audit log
+006500     CALL 'DBLOGR' USING WS-LOG-REC.
+006600     MOVE '00' TO LS-RESULT.
+006700     GOBACK.
+`
+  },
+  {
+    name: 'CUSTINQ.cbl',
+    path: 'cbl/CUSTINQ.cbl',
+    sizeBytes: 1420,
+    lastModified: '2026-08-05T16:20:00.000Z',
+    content: `000100 IDENTIFICATION DIVISION.
+000200 PROGRAM-ID. CUSTINQ.
+000300 AUTHOR. ENTERPRISE CORE BANKING TEAM.
+000400* ============================================================
+000500* CUSTOMER MASTER INQUIRY SERVICE
+000600* ============================================================
+000700 DATA DIVISION.
+000800 WORKING-STORAGE SECTION.
+000900     COPY CUSTREC.
+001000     EXEC SQL INCLUDE SQLCA END-EXEC.
+001100
+001200 01  WS-ADDR-LINE1           PIC X(50).
+001300 01  WS-CITY                 PIC X(30).
+001400 01  WS-STATE                PIC X(2).
+001500 01  WS-ZIP                  PIC X(10).
+001600
+001700 LINKAGE SECTION.
+001800 01  LS-CUST-ID              PIC 9(9).
+001900 01  LS-RETURN-CD            PIC X(2).
+002000
+002100 PROCEDURE DIVISION USING LS-CUST-ID LS-RETURN-CD.
+002200 0000-LOOKUP SECTION.
+002300 0000-START.
+002400* Query Primary Customer Record
+002500     EXEC SQL
+002600         SELECT CUST_ID, FIRST_NAME, LAST_NAME, CREDIT_SCORE, EMAIL
+002700         INTO :WS-CUST-ID, :WS-FIRST-NAME, :WS-LAST-NAME, :WS-CREDIT-SCORE, :WS-EMAIL
+002800         FROM CUSTOMERS
+002900         WHERE CUST_ID = :LS-CUST-ID
+003000     END-EXEC.
+003100
+003200     IF SQLCODE = 0
+003300* Query Address table (NOTE: CUST_ADDR table has no DCLGEN declared)
+003400         EXEC SQL
+003500             SELECT ADDR_LINE1, CITY, STATE_CD, ZIP_CODE
+003600             INTO :WS-ADDR-LINE1, :WS-CITY, :WS-STATE, :WS-ZIP
+003700             FROM CUST_ADDR
+003800             WHERE CUST_ID = :LS-CUST-ID
+003900         END-EXEC
+004000         MOVE '00' TO LS-RETURN-CD
+004100     ELSE
+004200         MOVE '01' TO LS-RETURN-CD
+004300     END-IF.
+004400
+004500     GOBACK.
+`
+  },
+  {
+    name: 'DBLOGR.cbl',
+    path: 'cbl/DBLOGR.cbl',
+    sizeBytes: 980,
+    lastModified: '2026-07-28T10:00:00.000Z',
+    content: `000100 IDENTIFICATION DIVISION.
+000200 PROGRAM-ID. DBLOGR.
+000300 AUTHOR. ENTERPRISE CORE BANKING TEAM.
+000400* ============================================================
+000500* CENTRALIZED AUDIT & TELEMETRY DB2 LOGGER
+000600* ============================================================
+000700 DATA DIVISION.
+000800 WORKING-STORAGE SECTION.
+000900     COPY LOGREC.
+001000     EXEC SQL INCLUDE SQLCA END-EXEC.
+001100
+001200 LINKAGE SECTION.
+001300 01  LS-LOG-PAYLOAD.
+001400     05  LS-CALLING-PGM      PIC X(8).
+001500     05  LS-ACTION-MSG       PIC X(40).
+001600     05  LS-RETURN-CODE      PIC 9(4).
+001700
+001800 PROCEDURE DIVISION USING LS-LOG-PAYLOAD.
+001900 0000-LOG-EVENT SECTION.
+002000 0000-START.
+002100     EXEC SQL
+002200         INSERT INTO AUDIT_LOG (
+002300             LOG_ID, PGM_NAME, ACTION_DESC, STATUS_CODE, LOG_TIMESTAMP
+002400         ) VALUES (
+002500             DEFAULT, :LS-CALLING-PGM, :LS-ACTION-MSG, :LS-RETURN-CODE, CURRENT TIMESTAMP
+002600         )
+002700     END-EXEC.
+002800     GOBACK.
+`
+  },
+  {
+    name: 'ACCTREC.cpy',
+    path: 'cpy/ACCTREC.cpy',
+    sizeBytes: 620,
+    lastModified: '2026-07-15T08:00:00.000Z',
+    content: `* ============================================================
+* ACCTREC.CPY - ACCOUNT MASTER RECORD & DB2 DECLARATION
+* ============================================================
+     EXEC SQL DECLARE ACCOUNTS TABLE (
+         ACCT_ID        BIGINT NOT NULL PRIMARY KEY,
+         CUST_ID        BIGINT NOT NULL,
+         ACCT_TYPE      CHAR(4) NOT NULL,
+         BALANCE        DECIMAL(15,2) NOT NULL,
+         STATUS         CHAR(2) NOT NULL,
+         LAST_TXN_DT    DATE
+     ) END-EXEC.
+
+ 01  WS-ACCOUNT-RECORD.
+     05  WS-ACCT-ID          PIC 9(10).
+     05  WS-CUST-ID          PIC 9(9).
+     05  WS-ACCT-TYPE        PIC X(4).
+     05  WS-BALANCE          PIC S9(13)V99 COMP-3.
+     05  WS-STATUS           PIC X(2).
+     05  WS-LAST-TXN-DT      PIC X(10).
+`
+  },
+  {
+    name: 'CUSTREC.cpy',
+    path: 'cpy/CUSTREC.cpy',
+    sizeBytes: 590,
+    lastModified: '2026-07-15T08:05:00.000Z',
+    content: `* ============================================================
+* CUSTREC.CPY - CUSTOMER MASTER RECORD LAYOUT
+* ============================================================
+     EXEC SQL DECLARE CUSTOMERS TABLE (
+         CUST_ID        BIGINT NOT NULL PRIMARY KEY,
+         FIRST_NAME     VARCHAR(40) NOT NULL,
+         LAST_NAME      VARCHAR(40) NOT NULL,
+         CREDIT_SCORE   INTEGER,
+         EMAIL          VARCHAR(80)
+     ) END-EXEC.
+
+ 01  WS-CUSTOMER-RECORD.
+     05  WS-CUST-ID          PIC 9(9).
+     05  WS-FIRST-NAME       PIC X(40).
+     05  WS-LAST-NAME        PIC X(40).
+     05  WS-CREDIT-SCORE     PIC 9(4).
+     05  WS-EMAIL            PIC X(80).
+`
+  },
+  {
+    name: 'TXNREC.cpy',
+    path: 'cpy/TXNREC.cpy',
+    sizeBytes: 680,
+    lastModified: '2026-07-15T08:10:00.000Z',
+    content: `* ============================================================
+* TXNREC.CPY - FINANCIAL TRANSACTION LEDGER RECORD
+* ============================================================
+     EXEC SQL DECLARE TRANSACTIONS TABLE (
+         TXN_ID         VARCHAR(16) NOT NULL PRIMARY KEY,
+         ACCT_ID        BIGINT NOT NULL,
+         TXN_TYPE       CHAR(8) NOT NULL,
+         AMOUNT         DECIMAL(15,2) NOT NULL,
+         TXN_DATE       TIMESTAMP NOT NULL,
+         STATUS         CHAR(8) NOT NULL
+     ) END-EXEC.
+
+ 01  WS-TXN-RECORD.
+     05  WS-TXN-ID           PIC X(16).
+     05  WS-ACCT-ID          PIC 9(10).
+     05  WS-TXN-TYPE         PIC X(8).
+     05  WS-AMOUNT           PIC S9(13)V99 COMP-3.
+     05  WS-STATUS           PIC X(8).
+`
+  },
+  {
+    name: 'LOGREC.cpy',
+    path: 'cpy/LOGREC.cpy',
+    sizeBytes: 510,
+    lastModified: '2026-07-15T08:15:00.000Z',
+    content: `* ============================================================
+* LOGREC.CPY - AUDIT & TELEMETRY DATA STRUCTURE
+* ============================================================
+     EXEC SQL DECLARE AUDIT_LOG TABLE (
+         LOG_ID         BIGINT NOT NULL GENERATED ALWAYS AS IDENTITY,
+         PGM_NAME       CHAR(8) NOT NULL,
+         ACTION_DESC    VARCHAR(100),
+         STATUS_CODE    INTEGER,
+         LOG_TIMESTAMP  TIMESTAMP NOT NULL
+     ) END-EXEC.
+
+ 01  WS-LOG-RECORD-DEF.
+     05  WS-LOG-ID           PIC 9(18).
+     05  WS-LOG-PGM          PIC X(8).
+     05  WS-LOG-DESC         PIC X(100).
+     05  WS-LOG-CODE         PIC 9(4).
+`
+  },
+  {
+    name: 'SQLCA.cpy',
+    path: 'cpy/SQLCA.cpy',
+    sizeBytes: 680,
+    lastModified: '2026-05-10T12:00:00.000Z',
+    content: `* ============================================================
+* SQLCA.CPY - IBM DB2 SQL COMMUNICATION AREA
+* ============================================================
+ 01  SQLCA.
+     05  SQLCAID             PIC X(8) VALUE 'SQLCA   '.
+     05  SQLCABC             PIC S9(9) COMP VALUE 136.
+     05  SQLCODE             PIC S9(9) COMP.
+     05  SQLERRML            PIC S9(4) COMP.
+     05  SQLERRMC            PIC X(70).
+     05  SQLERRP             PIC X(8).
+     05  SQLERRD             OCCURS 6 TIMES PIC S9(9) COMP.
+     05  SQLWARN.
+         10  SQLWARN0        PIC X(1).
+         10  SQLWARN1        PIC X(1).
+         10  SQLWARN2        PIC X(1).
+         10  SQLWARN3        PIC X(1).
+         10  SQLWARN4        PIC X(1).
+         10  SQLWARN5        PIC X(1).
+         10  SQLWARN6        PIC X(1).
+         10  SQLWARN7        PIC X(1).
+     05  SQLEXT              PIC X(8).
+`
+  },
+  {
+    name: 'COMMERR.cpy',
+    path: 'cpy/COMMERR.cpy',
+    sizeBytes: 420,
+    lastModified: '2026-05-10T12:00:00.000Z',
+    content: `* ============================================================
+* COMMERR.CPY - STANDARDIZED ERROR RECORD
+* ============================================================
+ 01  WS-COMMON-ERROR-BLOCK.
+     05  WS-ERR-CODE         PIC 9(4) VALUE 0.
+     05  WS-ERR-SEVERITY     PIC X(1) VALUE 'I'.
+     05  WS-ERR-MESSAGE      PIC X(80) VALUE SPACES.
+     05  WS-ERR-TIMESTAMP    PIC X(26) VALUE SPACES.
+`
+  },
+  {
+    name: 'DAILYJOB.jcl',
+    path: 'jcl/DAILYJOB.jcl',
+    sizeBytes: 890,
+    lastModified: '2026-08-25T17:00:00.000Z',
+    content: `//DAILYJOB JOB (ACCT01,PROD),'CORE OVERNIGHT',CLASS=A,MSGCLASS=X,
+//         NOTIFY=&SYSUID
+//* ============================================================
+//* NIGHTLY SETTLEMENT & BATCH POSTING CONTROLLER
+//* ============================================================
+//STEP010  EXEC PGM=BATMN01
+//STEPLIB  DD DSN=PROD.BANKING.LOADLIB,DISP=SHR
+//SYSIN    DD DSN=PROD.BATCH.CNTL(PARAMS),DISP=SHR
+//SYSOUT   DD SYSOUT=*
+//SYSPRINT DD SYSOUT=*
+//SYSUDUMP DD SYSOUT=*
+//ACCTIN   DD DSN=PROD.BANKING.ACCT.MASTER,DISP=SHR
+//AUDITOUT DD DSN=PROD.BANKING.AUDIT.DAILY(+1),
+//            DISP=(NEW,CATLG,DELETE),
+//            SPACE=(CYL,(10,5),RLSE),
+//            DCB=(RECFM=FB,LRECL=120,BLKSIZE=27960)
+//
+`
+  },
+  {
+    name: 'EOMSETTL.jcl',
+    path: 'jcl/EOMSETTL.jcl',
+    sizeBytes: 740,
+    lastModified: '2026-08-28T18:30:00.000Z',
+    content: `//EOMSETTL JOB (ACCT02,PROD),'END OF MONTH',CLASS=B,MSGCLASS=X,
+//         NOTIFY=&SYSUID
+//* ============================================================
+//* END-OF-MONTH SETTLEMENT DISPATCHER
+//* ============================================================
+//STEP001  EXEC PGM=TXNPOST
+//STEPLIB  DD DSN=PROD.BANKING.LOADLIB,DISP=SHR
+//SYSOUT   DD SYSOUT=*
+//SYSPRINT DD SYSOUT=*
+//TXNFEED  DD DSN=PROD.TRANSACTIONS.MONTHLY,DISP=SHR
+//
+`
+  },
+  {
+    name: 'SCHEMAS.ddl',
+    path: 'sql/SCHEMAS.ddl',
+    sizeBytes: 1120,
+    lastModified: '2026-07-10T11:00:00.000Z',
+    content: `-- DATABASE DEFINITION LANGUAGE (DDL) FOR CORE BANKING
+CREATE DATABASE BANKDB;
+
+CREATE TABLE ACCOUNTS (
+    ACCT_ID        BIGINT NOT NULL PRIMARY KEY,
+    CUST_ID        BIGINT NOT NULL,
+    ACCT_TYPE      CHAR(4) NOT NULL,
+    BALANCE        DECIMAL(15,2) NOT NULL,
+    STATUS         CHAR(2) NOT NULL,
+    LAST_TXN_DT    DATE
+);
+
+CREATE TABLE TRANSACTIONS (
+    TXN_ID         VARCHAR(16) NOT NULL PRIMARY KEY,
+    ACCT_ID        BIGINT NOT NULL,
+    TXN_TYPE       CHAR(8) NOT NULL,
+    AMOUNT         DECIMAL(15,2) NOT NULL,
+    TXN_DATE       TIMESTAMP NOT NULL,
+    STATUS         CHAR(8) NOT NULL
+);
+`
+  }
+];
